@@ -1398,6 +1398,38 @@ public class McpSchemaTests {
 	}
 
 	@Test
+	void testCallToolResultBuilderWithArrayStructuredContent() throws Exception {
+		List<Map<String, Object>> structuredContent = List.of(Map.of("id", "1"), Map.of("id", "2"));
+		String structuredContentJson = JSON_MAPPER.writeValueAsString(structuredContent);
+
+		McpSchema.CallToolResult result = McpSchema.CallToolResult.builder()
+			.structuredContent(JSON_MAPPER, structuredContentJson)
+			.build();
+		McpSchema.CallToolResult roundTripped = JSON_MAPPER.readValue(JSON_MAPPER.writeValueAsString(result),
+				McpSchema.CallToolResult.class);
+
+		assertThat(roundTripped.structuredContent()).isEqualTo(structuredContent);
+	}
+
+	@Test
+	void testCallToolResultBuilderWithScalarStructuredContent() throws Exception {
+		McpSchema.CallToolResult result = McpSchema.CallToolResult.builder()
+			.structuredContent(JSON_MAPPER, "\"ready\"")
+			.build();
+		McpSchema.CallToolResult roundTripped = JSON_MAPPER.readValue(JSON_MAPPER.writeValueAsString(result),
+				McpSchema.CallToolResult.class);
+
+		assertThat(roundTripped.structuredContent()).isEqualTo("ready");
+	}
+
+	@Test
+	void testCallToolResultBuilderRejectsNullStructuredContentJson() {
+		assertThatThrownBy(() -> McpSchema.CallToolResult.builder().structuredContent(JSON_MAPPER, "null"))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("structuredContent must not be null");
+	}
+
+	@Test
 	void testCallToolResultBuilderWithMultipleContents() throws Exception {
 		McpSchema.TextContent textContent = McpSchema.TextContent.builder("Text result").build();
 		McpSchema.ImageContent imageContent = McpSchema.ImageContent.builder("base64data", "image/png").build();

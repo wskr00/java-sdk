@@ -3226,8 +3226,8 @@ public final class McpSchema {
 	 * can be text, an image, or an embedded resource.
 	 * @param isError If true, indicates that the tool execution failed and the content
 	 * contains error information. If false or absent, indicates successful execution.
-	 * @param structuredContent An optional JSON object that represents the structured
-	 * result of the tool call.
+	 * @param structuredContent An optional structured JSON value. Java {@code null}
+	 * indicates that the field is absent.
 	 * @param meta See specification for notes on _meta usage
 	 * <p>
 	 * Note: {@code content} is required by the MCP specification. Deserialization accepts
@@ -3316,10 +3316,16 @@ public final class McpSchema {
 				return this;
 			}
 
+			/**
+			 * Sets the structured content by parsing a non-null JSON value.
+			 * @param jsonMapper the mapper used to parse the value
+			 * @param structuredContent the JSON-encoded non-null structured content
+			 * @return this builder
+			 */
 			public Builder structuredContent(McpJsonMapper jsonMapper, String structuredContent) {
 				Assert.hasText(structuredContent, "structuredContent must not be empty");
 				try {
-					this.structuredContent = jsonMapper.readValue(structuredContent, MAP_TYPE_REF);
+					this.structuredContent(jsonMapper.readValue(structuredContent, Object.class));
 				}
 				catch (IOException e) {
 					throw new IllegalArgumentException("Invalid structured content: " + structuredContent, e);
