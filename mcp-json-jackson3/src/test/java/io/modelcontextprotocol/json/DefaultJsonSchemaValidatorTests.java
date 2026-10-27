@@ -79,6 +79,12 @@ class DefaultJsonSchemaValidatorTests {
 	}
 
 	@Test
+	void testValidateExplicitJsonNull() {
+		assertTrue(validator.validate(Map.of("type", "null"), JsonNull.INSTANCE).valid());
+		assertFalse(validator.validate(Map.of("type", "object"), JsonNull.INSTANCE).valid());
+	}
+
+	@Test
 	void testDefaultConstructor() {
 		DefaultJsonSchemaValidator defaultValidator = new DefaultJsonSchemaValidator();
 

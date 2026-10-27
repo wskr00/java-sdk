@@ -16,8 +16,11 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.annotation.Nulls;
+import io.modelcontextprotocol.json.JsonNull;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.TypeRef;
 import io.modelcontextprotocol.util.Assert;
@@ -1182,6 +1185,16 @@ public final class McpSchema {
 		}
 	}
 
+	/**
+	 * Result of a tool call.
+	 *
+	 * @param content returned content blocks
+	 * @param structuredContent structured JSON output; Java {@code null} means absent.
+	 * Use {@link JsonNull#INSTANCE} for explicit JSON {@code null}.
+	 * @param isError whether tool execution failed
+	 * @param resultType result kind
+	 * @param meta protocol metadata
+	 */
 	@JsonInclude(JsonInclude.Include.NON_ABSENT)
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public record CallToolResult( // @formatter:off
@@ -1196,12 +1209,36 @@ public final class McpSchema {
 			resultType = resultType == null ? ResultType.COMPLETE : resultType;
 		}
 
-		@JsonCreator
-		static CallToolResult fromJson(@JsonProperty("content") List<Content> content,
-				@JsonProperty("structuredContent") Object structuredContent, @JsonProperty("isError") Boolean isError,
-				@JsonProperty("resultType") String resultType, @JsonProperty("_meta") Map<String, Object> meta) {
-			content = content == null ? List.of() : content;
-			return new CallToolResult(content, structuredContent, isError, resultType, meta);
+		@JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+		static CallToolResult fromJson(CallToolResultJson result) {
+			List<Content> content = result.content == null ? List.of() : result.content;
+			return new CallToolResult(content, result.structuredContentValue, result.isError, result.resultType,
+					result.meta);
+		}
+
+		@JsonIgnoreProperties(ignoreUnknown = true)
+		private static final class CallToolResultJson {
+
+			@JsonProperty("content")
+			private List<Content> content;
+
+			@JsonProperty("isError")
+			private Boolean isError;
+
+			@JsonProperty("resultType")
+			private String resultType;
+
+			@JsonProperty("_meta")
+			private Map<String, Object> meta;
+
+			@JsonIgnore
+			private Object structuredContentValue;
+
+			@JsonSetter(value = "structuredContent", nulls = Nulls.SET)
+			private void setStructuredContent(Object value) {
+				this.structuredContentValue = value == null ? JsonNull.INSTANCE : value;
+			}
+
 		}
 
 		public static Builder builder() {
@@ -1230,6 +1267,12 @@ public final class McpSchema {
 				return this;
 			}
 
+			/**
+			 * Sets the structured content value. Use {@link JsonNull#INSTANCE} for
+			 * explicit JSON {@code null}, or Java {@code null} to leave the field absent.
+			 * @param structuredContent the structured JSON value, or Java {@code null}
+			 * @return this builder
+			 */
 			public Builder structuredContent(Object structuredContent) {
 				this.structuredContent = structuredContent;
 				return this;

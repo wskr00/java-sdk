@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import io.modelcontextprotocol.common.McpTransportContext;
+import io.modelcontextprotocol.json.JsonNull;
 import io.modelcontextprotocol.json.McpJsonDefaults;
 import io.modelcontextprotocol.json.schema.JsonSchemaValidator;
 import io.modelcontextprotocol.json.schema.JsonSchemaValidator.ValidationResponse;
@@ -109,15 +110,20 @@ class ToolsFeatureTests {
 
 	private static McpServer structuredServer(JsonSchemaValidator validator,
 			McpAsyncResponse<CallToolOutcome> response) {
+		return structuredServer(STRUCTURED_TOOL, validator, response);
+	}
+
+	private static McpServer structuredServer(Tool tool, JsonSchemaValidator validator,
+			McpAsyncResponse<CallToolOutcome> response) {
 		McpAsyncToolRepository repo = new McpAsyncToolRepository() {
 			@Override
 			public Mono<ToolsPage> list(McpRequestContext ctx, String cursor) {
-				return Mono.just(ToolsPage.of(List.of(STRUCTURED_TOOL)));
+				return Mono.just(ToolsPage.of(List.of(tool)));
 			}
 
 			@Override
 			public Mono<Tool> find(McpRequestContext ctx, String name) {
-				return Mono.just(STRUCTURED_TOOL);
+				return Mono.just(tool);
 			}
 
 			@Override
@@ -191,6 +197,38 @@ class ToolsFeatureTests {
 		JSONRPCResponse response = respond(server, CALL_STRUCTURED).block();
 
 		assertThat(greetingText(response)).isEqualTo("{\"n\":1}");
+	}
+
+	@Test
+	@SuppressWarnings("unchecked")
+	void explicitNullStructuredContentIsValidatedAndPreservedWithTextFallback() {
+		Tool tool = Tool.builder("structured", ToolsUtils.EMPTY_JSON_SCHEMA)
+			.outputSchema(Map.of("type", "null"))
+			.build();
+		CallToolResult result = CallToolResult.builder()
+			.structuredContent(JsonNull.INSTANCE)
+			.meta(Map.of("source", "tool"))
+			.build();
+		McpServer server = structuredServer(tool, McpJsonDefaults.getSchemaValidator(),
+				McpAsyncResponse.result(result));
+
+		JSONRPCResponse response = respond(server, CALL_STRUCTURED).block();
+
+		assertThat(response.error()).isNull();
+		Map<String, Object> responseResult = (Map<String, Object>) response.result();
+		assertThat(responseResult).containsEntry("structuredContent", null);
+		assertThat((Map<String, Object>) responseResult.get("_meta")).containsEntry("source", "tool");
+		assertThat(greetingText(response)).isEqualTo("null");
+	}
+
+	@Test
+	void explicitNullStructuredContentIsRejectedByNonNullOutputSchema() {
+		McpServer server = structuredServer(McpJsonDefaults.getSchemaValidator(),
+				McpAsyncResponse.result(CallToolResult.builder().structuredContent(JsonNull.INSTANCE).build()));
+
+		JSONRPCResponse response = respond(server, CALL_STRUCTURED).block();
+
+		assertThat(response.error().code()).isEqualTo(ErrorCodes.INTERNAL_ERROR);
 	}
 
 	@Test

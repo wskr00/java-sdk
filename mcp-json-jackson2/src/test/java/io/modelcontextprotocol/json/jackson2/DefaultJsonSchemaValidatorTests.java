@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import io.modelcontextprotocol.json.JsonNull;
 import io.modelcontextprotocol.spec.McpSchema;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -76,6 +77,12 @@ class DefaultJsonSchemaValidatorTests {
 		catch (Exception e) {
 			throw new RuntimeException("Failed to parse JSON: " + json, e);
 		}
+	}
+
+	@Test
+	void testValidateExplicitJsonNull() {
+		assertTrue(validator.validate(Map.of("type", "null"), JsonNull.INSTANCE).valid());
+		assertFalse(validator.validate(Map.of("type", "object"), JsonNull.INSTANCE).valid());
 	}
 
 	@Test

@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
+import io.modelcontextprotocol.json.JsonNull;
 import io.modelcontextprotocol.json.McpJsonDefaults;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.modern.JsonRpc.JSONRPCMessage;
@@ -91,6 +92,97 @@ class McpSchemaSerializationTests {
 			.build();
 		String json = this.jsonMapper.writeValueAsString(result);
 		assertThat(json).contains("\"ttlMs\":60000").contains("\"cacheScope\":\"private\"");
+	}
+
+	@Test
+	void listToolsResultPreservesSchemaDocuments() throws Exception {
+		Map<String, Object> inputSchema = Map.of("type", "object", "$defs",
+				Map.of("value", Map.of("oneOf", List.of(Map.of("type", "string"), Map.of("type", "integer")))),
+				"properties", Map.of("value", Map.of("$ref", "#/$defs/value"), "alias", Map.of("type", "string")),
+				"allOf",
+				List.of(Map.of("if",
+						Map.of("required", List.of("value"), "properties", Map.of("value", Map.of("type", "string"))),
+						"then", Map.of("properties", Map.of("value", Map.of("minLength", 1))), "else",
+						Map.of("properties", Map.of("value", Map.of("minimum", 0))))),
+				"anyOf", List.of(Map.of("required", List.of("value")), Map.of("required", List.of("alias"))),
+				"unevaluatedProperties", false);
+		Map<String, Object> outputSchema = Map.of("$defs", Map.of("item", Map.of("type", "string")), "oneOf",
+				List.of(Map.of("type", "array", "items", Map.of("$ref", "#/$defs/item")), Map.of("type", "boolean"),
+						Map.of("type", "null")));
+		Tool tool = Tool.builder("composed", inputSchema).outputSchema(outputSchema).build();
+		ListToolsResult result = ListToolsResult.builder(List.of(tool)).build();
+
+		String json = this.jsonMapper.writeValueAsString(result);
+		ListToolsResult roundTripped = this.jsonMapper.readValue(json, ListToolsResult.class);
+
+		assertThat(roundTripped.tools()).hasSize(1);
+		assertThat(roundTripped.tools().get(0).inputSchema()).isEqualTo(inputSchema);
+		assertThat(roundTripped.tools().get(0).outputSchema()).isEqualTo(outputSchema);
+	}
+
+	@Test
+	void callToolResultPreservesNonNullStructuredContentValues() throws Exception {
+		List<Object> structuredContents = List.of(Map.of("name", "MCP"), List.of("first", 2), "null", 42.5, true,
+				Map.of(), List.of(), "", 0, false);
+
+		for (Object structuredContent : structuredContents) {
+			CallToolResult result = CallToolResult.builder().structuredContent(structuredContent).build();
+			String json = this.jsonMapper.writeValueAsString(result);
+			CallToolResult roundTripped = this.jsonMapper.readValue(json, CallToolResult.class);
+
+			assertThat(roundTripped.structuredContent()).isEqualTo(structuredContent);
+		}
+	}
+
+	@Test
+	void callToolResultDistinguishesNullStructuredContentFromAbsence() throws Exception {
+		CallToolResult absent = this.jsonMapper.readValue("{\"content\":[]}", CallToolResult.class);
+		CallToolResult explicitNull = this.jsonMapper
+			.readValue("{\"content\":[],\"structuredContent\":null,\"unknown\":42}", CallToolResult.class);
+
+		assertThat(absent.structuredContent()).isNull();
+		assertThat(this.jsonMapper.writeValueAsString(absent)).doesNotContain("\"structuredContent\"");
+
+		assertThat(explicitNull.structuredContent()).isSameAs(JsonNull.INSTANCE);
+		assertThat(this.jsonMapper.writeValueAsString(explicitNull)).contains("\"structuredContent\":null");
+	}
+
+	@Test
+	void callToolResultBuilderPreservesJavaNullAsAbsence() throws Exception {
+		CallToolResult absent = CallToolResult.builder().build();
+		CallToolResult explicitNull = CallToolResult.builder().structuredContent(JsonNull.INSTANCE).build();
+		CallToolResult cleared = CallToolResult.builder()
+			.structuredContent(JsonNull.INSTANCE)
+			.structuredContent(null)
+			.build();
+		CallToolResult constructedWithNull = new CallToolResult(List.of(), null, null, McpSchema.ResultType.COMPLETE,
+				null);
+
+		assertThat(absent.structuredContent()).isNull();
+		assertThat(constructedWithNull.structuredContent()).isNull();
+		assertThat(cleared.structuredContent()).isNull();
+		assertThat(this.jsonMapper.writeValueAsString(cleared)).doesNotContain("\"structuredContent\"");
+		assertThat(explicitNull.structuredContent()).isSameAs(JsonNull.INSTANCE);
+		assertThat(absent).isNotEqualTo(explicitNull);
+		assertThat(this.jsonMapper.writeValueAsString(explicitNull)).contains("\"structuredContent\":null");
+	}
+
+	@Test
+	void callToolResultPreservesExplicitNullWhenCopied() throws Exception {
+		CallToolResult result = CallToolResult.builder()
+			.addContent(TextContent.builder("result").build())
+			.structuredContent(JsonNull.INSTANCE)
+			.isError(true)
+			.meta(Map.of("source", "tool"))
+			.build();
+		CallToolResult copy = new CallToolResult(result.content(), result.structuredContent(), result.isError(),
+				result.resultType(), result.meta());
+
+		assertThat(copy).isEqualTo(result);
+		assertThat(copy.hashCode()).isEqualTo(result.hashCode());
+		assertThat(copy.structuredContent()).isSameAs(JsonNull.INSTANCE);
+		assertThat(this.jsonMapper.readValue(this.jsonMapper.writeValueAsString(copy), CallToolResult.class))
+			.isEqualTo(result);
 	}
 
 	@Test

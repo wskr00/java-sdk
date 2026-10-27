@@ -16,8 +16,11 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.annotation.Nulls;
+import io.modelcontextprotocol.json.JsonNull;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.TypeRef;
 import io.modelcontextprotocol.util.Assert;
@@ -3227,7 +3230,8 @@ public final class McpSchema {
 	 * @param isError If true, indicates that the tool execution failed and the content
 	 * contains error information. If false or absent, indicates successful execution.
 	 * @param structuredContent An optional structured JSON value. Java {@code null}
-	 * indicates that the field is absent.
+	 * indicates that the field is absent; {@link JsonNull#INSTANCE} represents explicit
+	 * JSON {@code null}.
 	 * @param meta See specification for notes on _meta usage
 	 * <p>
 	 * Note: {@code content} is required by the MCP specification. Deserialization accepts
@@ -3246,15 +3250,36 @@ public final class McpSchema {
 			Assert.notNull(content, "content must not be null");
 		}
 
-		@JsonCreator
-		static CallToolResult fromJson(@JsonProperty("content") List<Content> content,
-				@JsonProperty("isError") Boolean isError, @JsonProperty("structuredContent") Object structuredContent,
-				@JsonProperty("_meta") Map<String, Object> meta) {
+		@JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+		static CallToolResult fromJson(CallToolResultJson result) {
+			List<Content> content = result.content;
 			if (content == null) {
 				logger.warn("CallToolResult: missing required fields during deserialization: content -> []");
 				content = List.of();
 			}
-			return new CallToolResult(content, isError, structuredContent, meta);
+			return new CallToolResult(content, result.isError, result.structuredContentValue, result.meta);
+		}
+
+		@JsonIgnoreProperties(ignoreUnknown = true)
+		private static final class CallToolResultJson {
+
+			@JsonProperty("content")
+			private List<Content> content;
+
+			@JsonProperty("isError")
+			private Boolean isError;
+
+			@JsonProperty("_meta")
+			private Map<String, Object> meta;
+
+			@JsonIgnore
+			private Object structuredContentValue;
+
+			@JsonSetter(value = "structuredContent", nulls = Nulls.SET)
+			private void setStructuredContent(Object value) {
+				this.structuredContentValue = value == null ? JsonNull.INSTANCE : value;
+			}
+
 		}
 
 		/**
@@ -3310,6 +3335,13 @@ public final class McpSchema {
 				return this;
 			}
 
+			/**
+			 * Sets the structured content value. Use {@link JsonNull#INSTANCE} for
+			 * explicit JSON {@code null}; omit this call to leave the field absent.
+			 * @param structuredContent the non-null structured JSON value
+			 * @return this builder
+			 * @throws IllegalArgumentException if structuredContent is Java {@code null}
+			 */
 			public Builder structuredContent(Object structuredContent) {
 				Assert.notNull(structuredContent, "structuredContent must not be null");
 				this.structuredContent = structuredContent;
@@ -3317,15 +3349,17 @@ public final class McpSchema {
 			}
 
 			/**
-			 * Sets the structured content by parsing a non-null JSON value.
+			 * Sets the structured content by parsing a JSON value, including JSON
+			 * {@code null}, which is represented by {@link JsonNull#INSTANCE}.
 			 * @param jsonMapper the mapper used to parse the value
-			 * @param structuredContent the JSON-encoded non-null structured content
+			 * @param structuredContent the JSON-encoded structured content
 			 * @return this builder
 			 */
 			public Builder structuredContent(McpJsonMapper jsonMapper, String structuredContent) {
 				Assert.hasText(structuredContent, "structuredContent must not be empty");
 				try {
-					this.structuredContent(jsonMapper.readValue(structuredContent, Object.class));
+					Object value = jsonMapper.readValue(structuredContent, Object.class);
+					this.structuredContent(value == null ? JsonNull.INSTANCE : value);
 				}
 				catch (IOException e) {
 					throw new IllegalArgumentException("Invalid structured content: " + structuredContent, e);

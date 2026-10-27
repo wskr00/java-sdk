@@ -62,6 +62,8 @@ public interface JsonSchemaValidator {
 	 * JSON document and parsed before validation; quote embedded strings accordingly (for
 	 * example {@code "\"red\""} for the JSON string value {@code red}). Any other type is
 	 * converted to its JSON representation directly.
+	 * {@link io.modelcontextprotocol.json.JsonNull#INSTANCE} represents the explicit JSON
+	 * {@code null} value and must be validated as such.
 	 * @param schema The JSON schema to validate against.
 	 * @param structuredContent The structured content to validate.
 	 * @return A ValidationResponse indicating whether the validation was successful or

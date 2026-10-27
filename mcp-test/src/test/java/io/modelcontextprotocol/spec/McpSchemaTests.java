@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.modelcontextprotocol.json.JsonNull;
 import io.modelcontextprotocol.json.TypeRef;
 import io.modelcontextprotocol.spec.McpSchema.TextResourceContents;
 import net.javacrumbs.jsonunit.core.Option;
@@ -1240,6 +1241,32 @@ public class McpSchemaTests {
 	}
 
 	@Test
+	void testListToolsResultPreservesSchemaDocuments() throws Exception {
+		Map<String, Object> inputSchema = Map.of("type", "object", "$defs",
+				Map.of("value", Map.of("oneOf", List.of(Map.of("type", "string"), Map.of("type", "integer")))),
+				"properties", Map.of("value", Map.of("$ref", "#/$defs/value"), "alias", Map.of("type", "string")),
+				"allOf",
+				List.of(Map.of("if",
+						Map.of("required", List.of("value"), "properties", Map.of("value", Map.of("type", "string"))),
+						"then", Map.of("properties", Map.of("value", Map.of("minLength", 1))), "else",
+						Map.of("properties", Map.of("value", Map.of("minimum", 0))))),
+				"anyOf", List.of(Map.of("required", List.of("value")), Map.of("required", List.of("alias"))),
+				"unevaluatedProperties", false);
+		Map<String, Object> outputSchema = Map.of("$defs", Map.of("item", Map.of("type", "string")), "oneOf",
+				List.of(Map.of("type", "array", "items", Map.of("$ref", "#/$defs/item")), Map.of("type", "boolean"),
+						Map.of("type", "null")));
+		McpSchema.Tool tool = McpSchema.Tool.builder("composed", inputSchema).outputSchema(outputSchema).build();
+		McpSchema.ListToolsResult result = McpSchema.ListToolsResult.builder(List.of(tool)).build();
+
+		String json = JSON_MAPPER.writeValueAsString(result);
+		McpSchema.ListToolsResult roundTripped = JSON_MAPPER.readValue(json, McpSchema.ListToolsResult.class);
+
+		assertThat(roundTripped.tools()).hasSize(1);
+		assertThat(roundTripped.tools().get(0).inputSchema()).isEqualTo(inputSchema);
+		assertThat(roundTripped.tools().get(0).outputSchema()).isEqualTo(outputSchema);
+	}
+
+	@Test
 	void testToolDeserializationWithoutOutputSchema() throws Exception {
 		String toolJson = """
 				{
@@ -1423,10 +1450,77 @@ public class McpSchemaTests {
 	}
 
 	@Test
-	void testCallToolResultBuilderRejectsNullStructuredContentJson() {
-		assertThatThrownBy(() -> McpSchema.CallToolResult.builder().structuredContent(JSON_MAPPER, "null"))
+	void testCallToolResultBuilderPreservesNonNullStructuredContentValues() throws Exception {
+		List<Object> structuredContents = List.of(Map.of("name", "MCP"), List.of("first", 2), "null", 42.5, true,
+				Map.of(), List.of(), "", 0, false);
+
+		for (Object structuredContent : structuredContents) {
+			McpSchema.CallToolResult result = McpSchema.CallToolResult.builder()
+				.structuredContent(structuredContent)
+				.build();
+			String json = JSON_MAPPER.writeValueAsString(result);
+			McpSchema.CallToolResult roundTripped = JSON_MAPPER.readValue(json, McpSchema.CallToolResult.class);
+
+			assertThat(roundTripped.structuredContent()).isEqualTo(structuredContent);
+		}
+	}
+
+	@Test
+	void testCallToolResultDistinguishesNullStructuredContentFromAbsence() throws Exception {
+		McpSchema.CallToolResult absent = JSON_MAPPER.readValue("{\"content\":[]}", McpSchema.CallToolResult.class);
+		McpSchema.CallToolResult explicitNull = JSON_MAPPER
+			.readValue("{\"content\":[],\"structuredContent\":null,\"unknown\":42}", McpSchema.CallToolResult.class);
+
+		assertThat(absent.structuredContent()).isNull();
+		assertThat(JSON_MAPPER.writeValueAsString(absent)).doesNotContain("\"structuredContent\"");
+
+		assertThat(explicitNull.structuredContent()).isSameAs(JsonNull.INSTANCE);
+		assertThat(JSON_MAPPER.writeValueAsString(explicitNull)).contains("\"structuredContent\":null");
+	}
+
+	@Test
+	void testCallToolResultUsesJsonNullForExplicitNull() throws Exception {
+		McpSchema.CallToolResult absent = McpSchema.CallToolResult.builder().build();
+		McpSchema.CallToolResult explicitNull = McpSchema.CallToolResult.builder()
+			.structuredContent(JsonNull.INSTANCE)
+			.build();
+		McpSchema.CallToolResult constructedWithNull = new McpSchema.CallToolResult(List.of(), null, null, null);
+		McpSchema.CallToolResult parsedNull = McpSchema.CallToolResult.builder()
+			.structuredContent(JSON_MAPPER, "null")
+			.build();
+
+		assertThat(absent.structuredContent()).isNull();
+		assertThat(constructedWithNull.structuredContent()).isNull();
+		assertThat(explicitNull.structuredContent()).isSameAs(JsonNull.INSTANCE);
+		assertThat(parsedNull.structuredContent()).isSameAs(JsonNull.INSTANCE);
+		assertThat(absent).isNotEqualTo(explicitNull);
+		assertThat(JSON_MAPPER.writeValueAsString(explicitNull)).contains("\"structuredContent\":null");
+		assertThat(JSON_MAPPER.writeValueAsString(parsedNull)).contains("\"structuredContent\":null");
+	}
+
+	@Test
+	void testCallToolResultBuilderRejectsJavaNullStructuredContent() {
+		assertThatThrownBy(() -> McpSchema.CallToolResult.builder().structuredContent(null))
 			.isInstanceOf(IllegalArgumentException.class)
-			.hasMessageContaining("structuredContent must not be null");
+			.hasMessage("structuredContent must not be null");
+	}
+
+	@Test
+	void testCallToolResultPreservesExplicitNullWhenCopied() throws Exception {
+		McpSchema.CallToolResult result = McpSchema.CallToolResult.builder()
+			.addTextContent("result")
+			.structuredContent(JsonNull.INSTANCE)
+			.isError(true)
+			.meta(Map.of("source", "tool"))
+			.build();
+		McpSchema.CallToolResult copy = new McpSchema.CallToolResult(result.content(), result.isError(),
+				result.structuredContent(), result.meta());
+
+		assertThat(copy).isEqualTo(result);
+		assertThat(copy.hashCode()).isEqualTo(result.hashCode());
+		assertThat(copy.structuredContent()).isSameAs(JsonNull.INSTANCE);
+		assertThat(JSON_MAPPER.readValue(JSON_MAPPER.writeValueAsString(copy), McpSchema.CallToolResult.class))
+			.isEqualTo(result);
 	}
 
 	@Test
